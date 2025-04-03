@@ -18,25 +18,38 @@ from googleapiclient.http import MediaIoBaseDownload
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 import numpy as np
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from dash.exceptions import PreventUpdate
 
 
-# Conexión a la base de datos
-engine = create_engine('postgresql://wikijs:wikijsrocks@34.28.115.42:5432/wiki')
+# Database connection
+import sys
+sys.path.append('/Users/catalinabernal/Desktop/Quantil/Convocatoria - Conservación Internacional/Pollinator_Code/Pollinators_ID/conexion_sql/')
+from sql_connection import *
+engine = connect_mysql()
 
 
-# Coordenadas
+# Coordenates
 def faster_rcnn_to_yolo(bbox_rcnn, img_width, img_height):
     """
-    Convierte de formato Faster R-CNN (x_min, y_min, x_max, y_max)
-    a formato YOLO (x_center, y_center, width, height).
-    
-    bbox_rcnn: [x_min, y_min, x_max, y_max] en formato Faster R-CNN.
-    img_width: Ancho de la imagen.
-    img_height: Alto de la imagen.
-    
-    Retorna: [x_center, y_center, width, height] en formato YOLO.
+    Converts from Faster R-CNN format (x_min, y_min, x_max, y_max) to YOLO format (x_center, y_center, width, height).
+
+    Parameters
+    --------------------------
+
+    bbox_rcnn : list
+    [x_min, y_min, x_max, y_max] in Faster R-CNN format.
+
+    img_width : float
+    Width of the image.
+
+    img_height : float
+    Height of the image.
+
+    Output
+    ---------------------------
+
+    list: [x_center, y_center, width, height] in YOLO format.
     """
     x_min, y_min, x_max, y_max = bbox_rcnn
     
@@ -59,6 +72,21 @@ def faster_rcnn_to_yolo(bbox_rcnn, img_width, img_height):
 
 # Etiquetas
 def get_common_name(category : str):
+    '''
+    Returns the common name corresponding to the given category
+
+    Parameters
+    ---------------
+
+    category : str
+    Category related to the content of image
+
+    Output
+    ---------------
+    str
+    Common name of the category's image
+    '''
+
     dict_common_names = {'Blattodea': 'Cucarachas (y similares)',
                          'Coleoptera': 'Cucarrones, mariquitas (escarabajos en general)',
                          'Dermaptera' : 'Tijeretas',
@@ -80,8 +108,21 @@ def get_common_name(category : str):
 
 # Base de datos
 def get_image_data():
+    '''
+    This functions retrieves the image date from de dataset collection
+
+    Parameters
+    ------------------
+
+    None
+
+    Output
+    ------------------
+    list_info : tuple
+    Tuple with the information of the image
+    '''
     
-    query = 'SELECT * FROM polinizadores.validacion_imagenes WHERE validated_box = 0 AND discarded_image = 0 AND discarded_box = 0 AND is_in_use = 0 ORDER BY RANDOM() LIMIT 1'
+    query = 'SELECT * FROM validacion_imagenes WHERE validated_box = 0 AND discarded_image = 0 AND discarded_box = 0 AND is_in_use = 0 ORDER BY RAND() LIMIT 1'
     
     df = pd.read_sql(query, engine)
     list_info = ({'id': df.id.iloc[0], 'image_path' : df.image_path.iloc[0], 'url': df['url_image'].iloc[0].split('/')[-2], 
@@ -93,7 +134,7 @@ def get_image_data():
 
     with engine.begin() as connection:
         query = text(f"""
-                UPDATE polinizadores.validacion_imagenes 
+                UPDATE validacion_imagenes 
                         SET is_in_use = 1 
                         WHERE id = :image_id AND image_path = :image_path
             """)
@@ -103,13 +144,28 @@ def get_image_data():
 
 # Conexión Drive para imágenes
 creds = service_account.Credentials.from_service_account_file(
-    'conexion_drive/polinizadores-438316-8355b2af125c.json',
+    '/Users/catalinabernal/Desktop/Quantil/Convocatoria - Conservación Internacional/Pollinator_Code/Pollinators_ID/conexion_drive/polinizadores-438316-8355b2af125c.json',
     scopes=['https://www.googleapis.com/auth/drive']
 )
 
 drive_service = build('drive', 'v3', credentials=creds)
 
 def retrieve_image_from_drive(file_id: str):
+    '''
+    Retrieves image from files allocated in Google Drive Folder
+
+    Parameters
+    ----------------
+
+    file_id : str
+    Identificator of the image
+
+    Output
+    ----------------
+    image : image
+    Image object
+    '''
+    
     image_data = io.BytesIO()
     request = drive_service.files().get_media(fileId=file_id)
     downloader = MediaIoBaseDownload(image_data, request)
@@ -278,7 +334,7 @@ def validate_and_next_image(correct_clicks, incorrect_clicks, validate_image_cli
         print('entra a correct_clicks')
         with engine.begin() as connection:
             query = text(f"""
-                UPDATE polinizadores.validacion_imagenes 
+                UPDATE validacion_imagenes 
                 SET validated_box = 1, is_in_use = 0
                 WHERE id = :image_id AND image_path = :image_path
             """)
@@ -297,7 +353,7 @@ def validate_and_next_image(correct_clicks, incorrect_clicks, validate_image_cli
         print('entra a incorrect_clicks')
         with engine.begin() as connection:
             query = text(f"""
-                UPDATE polinizadores.validacion_imagenes 
+                UPDATE validacion_imagenes 
                 SET discarded_box = 1, is_in_use = 0 
                 WHERE id = :image_id AND image_path = :image_path
             """)
@@ -316,7 +372,7 @@ def validate_and_next_image(correct_clicks, incorrect_clicks, validate_image_cli
         print('entra a validar imagen')
         with engine.begin() as connection:
             query = text(f"""
-                UPDATE polinizadores.validacion_imagenes 
+                UPDATE validacion_imagenes 
                 SET discarded_image = 1, validated_box = 1, is_in_use = 0 
                 WHERE image_path = :image_path
             """)
@@ -335,7 +391,7 @@ def validate_and_next_image(correct_clicks, incorrect_clicks, validate_image_cli
         print('entra a cambiar imagen por not sure')
         with engine.begin() as connection:
             query = text(f"""
-                UPDATE polinizadores.validacion_imagenes 
+                UPDATE validacion_imagenes 
                 SET is_in_use = 0 
                 WHERE id = :image_id AND image_path = :image_path
             """)
@@ -391,7 +447,7 @@ def save_and_next_image(next_clicks, coordinates):
         # Guardar las coordenadas en la base de datos
         with engine.begin() as connection:
             query = text(f"""
-                UPDATE polinizadores.validacion_imagenes 
+                UPDATE validacion_imagenes 
                 SET xmin_r = :xmin, ymin_r = :ymin, xmax_r = :xmax, ymax_r = :ymax ,
                          xcenter_y = :xcenter_y , ycenter_y = :ycenter_y, width_y = :width_y, height_y = :height_y,
                          validated_box = 1, is_in_use = 0
